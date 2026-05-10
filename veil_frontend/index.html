@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VEIL — Image Steganography</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="logo">veil<em>.</em></div>
+      <div class="tag">neural steganography ⁄ v1.0</div>
+    </div>
+    <div class="status" id="status">
+      <span class="dot"></span>
+      <span id="statusText">connecting…</span>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button type="button" class="tab active" data-panel="hide">
+      <span class="num">01</span> Hide
+    </button>
+    <button type="button" class="tab" data-panel="reveal">
+      <span class="num">02</span> Reveal
+    </button>
+  </div>
+
+  <!-- HIDE PANEL -->
+  <section class="panel active" id="panel-hide">
+    <div class="panel-head">
+      <h2>Conceal an image <em>within</em> another.</h2>
+      <p>Upload a cover and a secret. The neural encoder embeds the secret as an imperceptible perturbation inside the cover. The output is visually identical to the cover — but carries the secret you can recover later.</p>
+    </div>
+
+    <div class="drops">
+      <label class="drop" id="drop-cover">
+        <div class="drop-label"><span class="badge">A</span> Cover</div>
+        <div class="drop-content">
+          <div class="icon">+</div>
+          <div class="text"><strong>Drop or click</strong><br>the image users will see</div>
+        </div>
+        <div class="drop-preview" id="preview-cover"></div>
+        <input type="file" accept="image/*" id="file-cover">
+      </label>
+
+      <label class="drop" id="drop-secret">
+        <div class="drop-label"><span class="badge">B</span> Secret</div>
+        <div class="drop-content">
+          <div class="icon">+</div>
+          <div class="text"><strong>Drop or click</strong><br>the image to be hidden</div>
+        </div>
+        <div class="drop-preview" id="preview-secret"></div>
+        <input type="file" accept="image/*" id="file-secret">
+      </label>
+    </div>
+
+    <div class="controls">
+      <div class="opt">
+        <span class="opt-label">Format</span>
+        <div class="seg" id="fmt-hide">
+          <button type="button" class="active" data-fmt="png">PNG <span style="opacity:0.6">↺ lossless</span></button>
+          <button type="button" data-fmt="jpeg">JPEG <span style="opacity:0.6">⚠ lossy</span></button>
+        </div>
+      </div>
+      <button type="button" class="submit" id="btn-hide" disabled>
+        <span id="btn-hide-label">Encode</span>
+        <span class="arrow">→</span>
+      </button>
+    </div>
+
+    <div class="alert info">
+      <span class="icon">ⓘ</span>
+      <span>PNG is recommended. JPEG re-compression damages the hidden residual signal — use it only for previews, never for the file you'll later decode.</span>
+    </div>
+
+    <div class="results" id="results-hide">
+      <div class="results-head">
+        <h3>Encoding <em>complete</em></h3>
+        <div class="meta" id="hide-time"></div>
+      </div>
+
+      <div class="result-grid">
+        <div class="result-card">
+          <div class="head">
+            <span class="label"><strong>OUT</strong>Stego image</span>
+            <span class="label" id="stego-size"></span>
+          </div>
+          <div class="img-wrap"><img id="img-stego" alt="Stego output"></div>
+          <div class="actions">
+            <button type="button" class="primary" id="dl-stego">Download</button>
+            <button type="button" id="open-stego">Open in tab</button>
+          </div>
+        </div>
+
+        <div class="result-card">
+          <div class="head">
+            <span class="label"><strong>PRV</strong>Recovered preview</span>
+            <span class="label">decoder check</span>
+          </div>
+          <div class="img-wrap"><img id="img-rec" alt="Recovered preview"></div>
+          <div class="actions">
+            <button type="button" id="dl-rec">Download</button>
+            <button type="button" id="open-rec">Open in tab</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="name">Stego PSNR</div>
+          <div class="value"><span id="m-stego">—</span><span class="unit">dB</span></div>
+          <div class="desc">Higher = stego visually indistinguishable from cover. >35 dB is excellent.</div>
+        </div>
+        <div class="metric">
+          <div class="name">Recovery PSNR</div>
+          <div class="value"><span id="m-rec">—</span><span class="unit">dB</span></div>
+          <div class="desc">Higher = secret recovered more accurately. >25 dB on PNG is healthy.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REVEAL PANEL -->
+  <section class="panel" id="panel-reveal">
+    <div class="panel-head">
+      <h2>Recover what was <em>concealed</em>.</h2>
+      <p>Upload a stego image previously produced by the encoder. The decoder will extract the hidden secret. Use the original PNG file — JPEG copies will produce noticeably degraded recovery.</p>
+    </div>
+
+    <div class="drops single">
+      <label class="drop" id="drop-stego">
+        <div class="drop-label"><span class="badge">S</span> Stego</div>
+        <div class="drop-content">
+          <div class="icon">+</div>
+          <div class="text"><strong>Drop or click</strong><br>the encoded image</div>
+        </div>
+        <div class="drop-preview" id="preview-stego"></div>
+        <input type="file" accept="image/*" id="file-stego">
+      </label>
+    </div>
+
+    <div class="controls">
+      <div class="opt">
+        <span class="opt-label">Output format</span>
+        <div class="seg" id="fmt-reveal">
+          <button type="button" class="active" data-fmt="png">PNG</button>
+          <button type="button" data-fmt="jpeg">JPEG</button>
+        </div>
+      </div>
+      <button type="button" class="submit" id="btn-reveal" disabled>
+        <span id="btn-reveal-label">Decode</span>
+        <span class="arrow">→</span>
+      </button>
+    </div>
+
+    <div class="results" id="results-reveal">
+      <div class="results-head">
+        <h3>Decoding <em>complete</em></h3>
+        <div class="meta" id="reveal-time"></div>
+      </div>
+
+      <div class="result-grid single">
+        <div class="result-card">
+          <div class="head">
+            <span class="label"><strong>OUT</strong>Recovered secret</span>
+          </div>
+          <div class="img-wrap"><img id="img-recovered" alt="Recovered secret"></div>
+          <div class="actions">
+            <button type="button" class="primary" id="dl-recovered">Download</button>
+            <button type="button" id="open-recovered">Open in tab</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="alert-area"></div>
+
+  <footer>
+    <div>VEIL ⁄ csp-generator + deep u-net decoder</div>
+    <div>128 × 128 px ⁄ inference ≈ &lt;1s</div>
+  </footer>
+
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/health.js"></script>
+<script src="js/hide.js"></script>
+<script src="js/reveal.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
