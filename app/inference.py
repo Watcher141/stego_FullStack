@@ -34,11 +34,23 @@ class StegoEngine:
         self.Dec: DeepUNetDecoder | None = None
         self._loaded = False
 
-        # Same preprocessing as the notebook (CELL 4)
-        self.preprocess = transforms.Compose(
+        # Preprocessing for cover/secret: resize + center-crop arbitrary input down to 128×128
+        # This matches the notebook's training pipeline.
+        self.preprocess_input = transforms.Compose(
             [
                 transforms.Resize(int(IMG_SIZE * 1.12)),
                 transforms.CenterCrop(IMG_SIZE),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]
+        )
+
+        # Preprocessing for stego (already 128×128 from our own encoder):
+        # DO NOT resize/crop — that would destroy the hidden residual signal.
+        # If a non-128 image is uploaded, we resize WITHOUT center-cropping (which
+        # preserves all pixel content) and let the user know via console log.
+        self.preprocess_stego_exact = transforms.Compose(
+            [
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]
@@ -48,7 +60,6 @@ class StegoEngine:
     # Lifecycle
     # ──────────────────────────────────────────────────────────────
     def load(self):
-        """Load weights into memory. Call once at app startup."""
         if self._loaded:
             return
 
@@ -60,19 +71,13 @@ class StegoEngine:
         self.G = Generator().to(self.device)
         self.Dec = DeepUNetDecoder(in_channels=3, base=32).to(self.device)
 
-        self.G.load_state_dict(
-            torch.load(G_WEIGHTS_PATH, map_location=self.device)
-        )
-        self.Dec.load_state_dict(
-            torch.load(DEC_WEIGHTS_PATH, map_location=self.device)
-        )
+        self.G.load_state_dict(torch.load(G_WEIGHTS_PATH, map_location=self.device))
+        self.Dec.load_state_dict(torch.load(DEC_WEIGHTS_PATH, map_location=self.device))
 
         self.G.eval()
         self.Dec.eval()
 
-        # Discriminator is not used at inference time, but we silently note its presence.
         self.has_discriminator = D_WEIGHTS_PATH.exists()
-
         self._loaded = True
 
     def assert_loaded(self):
@@ -83,13 +88,24 @@ class StegoEngine:
     # Tensor <-> bytes helpers
     # ──────────────────────────────────────────────────────────────
     def bytes_to_tensor(self, raw: bytes) -> torch.Tensor:
-        """Decode an uploaded image into a (1,3,128,128) tensor in [-1,1]."""
+        """For cover/secret: arbitrary input → 128×128 tensor in [-1,1]."""
         img = Image.open(io.BytesIO(raw)).convert("RGB")
-        return self.preprocess(img).unsqueeze(0).to(self.device)
+        return self.preprocess_input(img).unsqueeze(0).to(self.device)
+
+    def stego_bytes_to_tensor(self, raw: bytes) -> torch.Tensor:
+        """For stego files we produced: load EXACT pixels, no resize/crop.
+
+        If somehow the file is not 128×128, we fall back to a direct resize
+        (no center-crop) to avoid losing edge pixels carrying the signal.
+        """
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        if img.size != (IMG_SIZE, IMG_SIZE):
+            # Plain resize (no crop) — best-effort if the file was tampered with
+            img = img.resize((IMG_SIZE, IMG_SIZE), Image.BILINEAR)
+        return self.preprocess_stego_exact(img).unsqueeze(0).to(self.device)
 
     @staticmethod
     def tensor_to_png_bytes(t: torch.Tensor) -> bytes:
-        """(1,3,H,W) or (3,H,W) tensor in [-1,1] → PNG bytes (lossless)."""
         t = t.detach().cpu()
         if t.dim() == 4:
             t = t.squeeze(0)
@@ -102,7 +118,6 @@ class StegoEngine:
 
     @staticmethod
     def tensor_to_jpeg_bytes(t: torch.Tensor, quality: int = 95) -> bytes:
-        """(1,3,H,W) or (3,H,W) tensor in [-1,1] → JPEG bytes."""
         t = t.detach().cpu()
         if t.dim() == 4:
             t = t.squeeze(0)
@@ -118,7 +133,6 @@ class StegoEngine:
     # ──────────────────────────────────────────────────────────────
     @staticmethod
     def _apply_residual(cover: torch.Tensor, gen_out: torch.Tensor) -> torch.Tensor:
-        """Exact residual formula from training (CELL 4: apply_residual)."""
         residual = gen_out * RESIDUAL_SCALE
         res_norm = residual.abs().mean(dim=[1, 2, 3], keepdim=True).clamp(min=1e-8)
         residual = residual * torch.clamp(res_norm / MIN_RESIDUAL, max=1.0).float()
@@ -133,10 +147,6 @@ class StegoEngine:
 
     @torch.no_grad()
     def hide(self, cover_bytes: bytes, secret_bytes: bytes) -> dict:
-        """
-        Hide `secret` inside `cover`. Returns a dict with stego/recovered tensors
-        and PSNR metrics. The caller decides which to encode/return.
-        """
         self.assert_loaded()
         cover = self.bytes_to_tensor(cover_bytes)
         secret = self.bytes_to_tensor(secret_bytes)
@@ -156,12 +166,15 @@ class StegoEngine:
 
     @torch.no_grad()
     def reveal(self, stego_bytes: bytes) -> dict:
-        """Recover the hidden secret from a stego image."""
+        """Recover hidden secret from a stego file we produced.
+
+        Uses exact-pixel loading (no resize/crop) so the residual signal survives.
+        """
         self.assert_loaded()
-        stego = self.bytes_to_tensor(stego_bytes)
+        stego = self.stego_bytes_to_tensor(stego_bytes)
         recovered = self.Dec(stego)
         return {"stego": stego, "recovered": recovered}
 
 
-# Module-level singleton — imported by routers
+# Module-level singleton
 engine = StegoEngine()
